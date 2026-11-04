@@ -143,6 +143,49 @@ SA.winFromCp = cp => 50 + 50 * (2 / (1 + Math.exp(-0.00368208 * cp)) - 1);
 SA.pov = (w, c) => c === "w" ? w : 100 - w;
 const VAL = { p: 1, n: 3, b: 3, r: 5, q: 9, k: 0 };
 SA.material = (fen, c) => { let m = 0; for (const ch of fen.split(" ")[0]) { const l = ch.toLowerCase(); if (VAL[l] != null) m += ((ch === l ? "b" : "w") === c ? 1 : -1) * VAL[l]; } return m; };
+/* Échange statique sur une case : gain matériel maximal pour le camp au trait,
+   en jouant toujours la plus petite pièce qui peut prendre (reprises comprises) */
+const SEEV = { p: 1, n: 3, b: 3, r: 5, q: 9, k: 100 };
+SA.see = (fen, sq) => {
+  const g = new Chess(fen), first = g.get(sq);
+  if (!first) return 0;
+  const gains = []; let onSq = SEEV[first.type];
+  for (let n = 0; n < 32; n++) {
+    const caps = g.moves({ verbose: true }).filter(m => m.to === sq && m.captured);
+    if (!caps.length) break;
+    caps.sort((a, b) => SEEV[a.piece] - SEEV[b.piece]);
+    const m = caps[0];
+    gains.push(onSq);
+    onSq = SEEV[m.promotion || m.piece];
+    g.move(m);
+  }
+  let v = 0;
+  for (let i = gains.length - 1; i >= 0; i--) v = Math.max(0, gains[i] - v);
+  return v;
+};
+/* Bilan matériel d'un coup : ce qu'il gagne tout de suite, moins ce que l'adversaire
+   peut ensuite gagner au mieux sur une seule case. net <= -2 : vrai sacrifice. */
+/* Vrai sacrifice : on suit la ligne du moteur après le coup (réponse adverse puis notre reprise).
+   Si l'adversaire prend du matériel et qu'on reste en déficit d'au moins 2 points après notre reprise,
+   c'est un sacrifice. Un échange normal (il prend, on reprend) s'équilibre et ne compte pas. */
+SA.sacrifice = (fenBefore, fenAfter, m, pv) => {
+  let worst = 0;
+  if (pv && pv.length) {
+    const g = new Chess(fenAfter);
+    const reply = g.move(SA.uciObj(pv[0]));
+    if (reply && reply.captured) {
+      if (pv[1]) g.move(SA.uciObj(pv[1]));
+      worst = Math.min(worst, SA.material(g.fen(), m.color) - SA.material(fenBefore, m.color));
+    }
+  }
+  /* La pièce jouée elle-même atterrit en prise (sacrifice offert, même si le moteur ne le prend pas) */
+  if (m.piece !== "p" && m.piece !== "k") {
+    const gained = (m.captured ? VAL[m.captured] : 0) + (m.promotion ? VAL[m.promotion] - 1 : 0);
+    worst = Math.min(worst, gained - SA.see(fenAfter, m.to));
+  }
+  return worst;
+};
+SA.CLS_VERSION = 2;
 SA.phaseOf = (fen, ply) => {
   let np = 0, q = 0;
   for (const ch of fen.split(" ")[0]) { const l = ch.toLowerCase(); if ("nbrq".includes(l)) np += VAL[l]; if (l === "q") q++; }
@@ -180,9 +223,9 @@ SA.classify = function (i, data) {
   if (i < bookPlies) k = "book";
   else if ((before.b && uci === before.b) || loss <= 0.5) {
     k = "best";
-    let sac = false;
-    if (after.b) { const g = new Chess(fens[i + 1]); const r = g.move(SA.uciObj(after.b)); if (r && SA.material(fens[i], c) - SA.material(g.fen(), c) >= 2) sac = true; }
-    if (sac && wa >= 50) k = "brilliant";
+    const matingNow = after.t === "mate" || (after.m != null && after.m * sgn > 0);
+    const choices = new Chess(fens[i]).moves().length;
+    if (choices > 1 && wa >= 50 && (wb < 95 || matingNow) && SA.sacrifice(fens[i], fens[i + 1], m, after.pv) <= -2) k = "brilliant";
     else if (before.w2 != null && uci === before.b && !hadMate && !after.t) {
       const w2 = SA.pov(before.w2, c);
       const recapture = i > 0 && m.captured && moves[i - 1].to === m.to && moves[i - 1].captured;
@@ -201,6 +244,23 @@ SA.summarize = cls => {
   cls.forEach(x => { if (!x) return; const p = s[x.c]; p.acc += x.acc; p.n++; p.cnt[x.k] = (p.cnt[x.k] || 0) + 1; });
   return { accW: s.w.n ? s.w.acc / s.w.n : null, accB: s.b.n ? s.b.acc / s.b.n : null, cntW: s.w.cnt, cntB: s.b.cnt };
 };
+
+/* Reclasse une analyse existante à partir de ses évaluations (sans moteur) */
+SA.reclassify = game => {
+  const a = game.analysis, p = SA.parsePgn(game.pgn);
+  const data = { evals: a.evals, cls: [], moves: p.moves, fens: p.fens, bookPlies: a.bookPlies || 0 };
+  for (let i = 0; i < p.moves.length; i++) data.cls[i] = SA.classify(i, data);
+  Object.assign(a, { cls: data.cls, cv: SA.CLS_VERSION }, SA.summarize(data.cls));
+  return game;
+};
+SA.migrated = (async () => {
+  try {
+    const old = (await SA.db.all()).filter(g => g.analysis && g.analysis.cv !== SA.CLS_VERSION);
+    const done = [];
+    for (const g of old) { try { done.push(SA.reclassify(g)); } catch (e) {} }
+    if (done.length) await SA.db.putMany(done);
+  } catch (e) {}
+})();
 
 /* Résultat du point de vue du joueur */
 SA.outcome = g => {

@@ -55,6 +55,7 @@
     $(".app").classList.toggle("has-tabs", !!tab || !views[name]);
     $("#tabs").hidden = !(tab || !views[name]);
     $$("#tabs a").forEach(a => a.classList.toggle("on", a.dataset.tab === (tab || "home")));
+    await SA.migrated;
     const v = $("#view"); v.innerHTML = ""; window.scrollTo(0, 0);
     try { cleanup = await fn(v, decodeURIComponent(rest.join("/"))) || null; }
     catch (e) { v.innerHTML = `<div class="empty"><p>Un problème est survenu : ${esc(e.message)}</p><a class="btn" href="#/">Retour à l'accueil</a></div>`; }

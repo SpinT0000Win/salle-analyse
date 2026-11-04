@@ -71,7 +71,7 @@
       onProgress && onProgress((i + 1) / N);
     }
     const sum = SA.summarize(data.cls);
-    return Object.assign({ v: 1, depth, evals: data.evals, cls: data.cls, bookPlies: book.k, bookName: book.k >= 2 ? book.name : "", at: Date.now() }, sum);
+    return Object.assign({ v: 1, cv: SA.CLS_VERSION, depth, evals: data.evals, cls: data.cls, bookPlies: book.k, bookName: book.k >= 2 ? book.name : "", at: Date.now() }, sum);
   };
 
   /* File d'analyse : une partie à la fois, l'écran reste allumé pendant le calcul */
