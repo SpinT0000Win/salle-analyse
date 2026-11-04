@@ -1,5 +1,5 @@
 /* Salle d'analyse — fonctionne hors connexion (sauf l'import des parties) */
-const VERSION = "sa-v1.0.0";
+const VERSION = "sa-v1.0.1";
 const SHELL = [
   "./", "index.html", "app.css", "manifest.webmanifest",
   "js/chess.js", "js/core.js", "js/api.js", "js/engine.js", "js/board.js", "js/views.js",
