@@ -60,6 +60,24 @@
     try { cleanup = await fn(v, decodeURIComponent(rest.join("/"))) || null; }
     catch (e) { v.innerHTML = `<div class="empty"><p>Un problème est survenu : ${esc(e.message)}</p><a class="btn" href="#/">Retour à l'accueil</a></div>`; }
   }
+  /* Version réellement chargée : nom du cache du service worker actif (ex. « sa-v1.0.1 ») */
+  SA.appVersion = async () => {
+    try { const ks = (await caches.keys()).filter(k => /^sa-v[\d.]+$/.test(k)).sort(); return ks.length ? ks[ks.length - 1].slice(4) : null; }
+    catch (e) { return null; }
+  };
+  /* Quand une nouvelle version prend la main, on recharge une fois et on le signale */
+  if ("serviceWorker" in navigator) {
+    const hadController = !!navigator.serviceWorker.controller;
+    let reloading = false;
+    navigator.serviceWorker.addEventListener("controllerchange", () => {
+      if (!hadController || reloading) return;
+      reloading = true;
+      try { sessionStorage.setItem("sa.updated", "1"); } catch (e) {}
+      location.reload();
+    });
+    let flag = null; try { flag = sessionStorage.getItem("sa.updated"); sessionStorage.removeItem("sa.updated"); } catch (e) {}
+    if (flag) setTimeout(async () => { const v = await SA.appVersion(); SA.toast(`Appli mise à jour${v ? ` : version ${v}` : ""}.`); }, 600);
+  }
   window.addEventListener("hashchange", () => { SA._navigated = true; route(); });
   window.addEventListener("DOMContentLoaded", route);
   if (document.readyState !== "loading") setTimeout(route, 0);
@@ -560,8 +578,10 @@
       <p class="small">Tes analyses ne sont stockées que sur ce téléphone. Exporte une sauvegarde avant de changer d'appareil ou de vider les données du navigateur.</p>
       <button type="button" class="btn danger" id="rz">Tout effacer</button>
       <h2>À propos</h2>
+      <div class="list-group"><div><span>Version de l'appli</span><span class="sub mono" id="ver">…</span></div></div>
       <p class="small">Moteur : Stockfish 19 lite (stockfish.js de Nathan Rugg), licence GPLv3 — <a href="https://github.com/nmrugg/stockfish.js" target="_blank" rel="noopener">code source</a>. Pièces : Cburnett (Wikimedia Commons), licence CC BY-SA 3.0. Règles : chess.js (licence BSD). Données : API publiques de chess.com et de Lichess.</p>`;
     $("#bk").onclick = () => back("#/");
+    SA.appVersion().then(ver => { const el = $("#ver"); if (el) el.textContent = ver || "inconnue"; });
     $("#dp").value = String(s.depth);
     $("#dp").onchange = e => { s.depth = +e.target.value; SA.saveSettings(); SA.toast("Profondeur enregistrée. Elle s'applique aux prochaines analyses."); };
     $("#ch").onchange = e => { s.chargeOnly = e.target.checked; SA.saveSettings(); };
